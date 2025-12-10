@@ -84,8 +84,7 @@ impl ksni::Tray for AppTray {
                 label: format!(
                     "Plan usage limits\nCurrent session ({}/100)",
                     self.five_hour_usage
-                )
-                .into(),
+                ),
                 visible: self.login,
                 ..Default::default()
             }
@@ -94,8 +93,7 @@ impl ksni::Tray for AppTray {
                 label: format!(
                     "Weekly usage limits\nAll models ({}/100)",
                     self.seven_day_usage
-                )
-                .into(),
+                ),
                 visible: self.login,
                 ..Default::default()
             }
