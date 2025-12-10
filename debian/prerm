@@ -1,0 +1,27 @@
+#!/bin/bash
+set -e
+
+# prerm script for claude-tray
+
+case "$1" in
+    remove|upgrade|deconfigure)
+        # Stop and disable the service if it's running
+        if [ -d /run/systemd/system ]; then
+            # Try to stop user services (best effort)
+            systemctl --user stop claude-tray >/dev/null 2>&1 || true
+            systemctl --user disable claude-tray >/dev/null 2>&1 || true
+        fi
+        ;;
+
+    failed-upgrade)
+        ;;
+
+    *)
+        echo "prerm called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

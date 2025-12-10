@@ -1,8 +1,30 @@
 [package]
 name = "claude-tray"
 version = "0.1.0"
-edition = "2024"
+description = "A Linux system tray application for monitoring Claude AI usage"
+keywords = ["claude", "monitor", "linux"]
+repository = "https://github.com/jrdx0/claude-tray"
+authors = ["Jared Peña Ochoa <jared@jrdx0.dev>"]
+readme = "README.md"
 license = "MIT"
+edition = "2024"
+rust-version = "1.91.1"
+
+[package.metadata.deb]
+maintainer = "Jared Peña Ochoa <jared@jrdx0.dev>"
+copyright = "2025, Jared Peña Ochoa <jared@jrdx0.dev>"
+license-file = ["LICENSE"]
+extended-description = """\
+Claude Tray is a Linux/Debian system tray utility that integrates with Claude AI's OAuth API. It provides\
+quick access to Claude AI services and displays usage statistics directly from your system tray."""
+depends = "$auto, systemd"
+section = "utility"
+priority = "optional"
+assets = [
+    ["target/release/claude-tray", "usr/bin/", "755"],
+    ["debian/claude-tray.service", "usr/lib/systemd/user/", "644"],
+]
+maintainer-scripts = "debian/"
 
 [dependencies]
 image = "0.25.9"

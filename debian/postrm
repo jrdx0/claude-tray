@@ -1,0 +1,33 @@
+#!/bin/bash
+set -e
+
+# postrm script for claude-tray
+
+case "$1" in
+    purge)
+        # Remove configuration files on purge
+        # Note: User-specific configs in ~/.config/claude-tray should be removed manually
+        echo "Claude Tray has been purged."
+        echo "User configuration files in ~/.config/claude-tray were not removed."
+        echo "Remove them manually if desired."
+        ;;
+
+    remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+        ;;
+
+    *)
+        echo "postrm called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+# Reload systemd daemon after service file removal
+if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload >/dev/null 2>&1 || true
+    fi
+fi
+
+#DEBHELPER#
+
+exit 0

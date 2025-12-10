@@ -1,0 +1,39 @@
+#!/bin/bash
+set -e
+
+# postinst script for claude-tray
+
+case "$1" in
+    configure)
+        # Reload systemd daemon to recognize new service
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload >/dev/null 2>&1 || true
+        fi
+
+        # Create config directory for all users if needed
+        # Note: Each user will need to run the service themselves
+
+        echo "Claude Tray installed successfully!"
+        echo ""
+        echo "To start the service for your user, run:"
+        echo "  systemctl --user enable --now claude-tray"
+        echo ""
+        echo "To check status:"
+        echo "  systemctl --user status claude-tray"
+        echo ""
+        echo "To view logs:"
+        echo "  journalctl --user -u claude-tray -f"
+        ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+
+    *)
+        echo "postinst called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0
