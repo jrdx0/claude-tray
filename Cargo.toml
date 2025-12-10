@@ -2,6 +2,7 @@
 name = "claude-tray"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
 
 [dependencies]
 image = "0.25.9"
