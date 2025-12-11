@@ -7,12 +7,12 @@ use std::{fs, process::Command};
 #[serde(rename_all = "camelCase")]
 pub struct ClaudeAiOauth {
     // This is the access token for the OAuth credentials of Claude AI.
-    pub access_token: String,
-    pub refresh_token: String,
-    pub expires_at: u64,
-    pub scopes: Vec<String>,
-    pub subscription_type: String,
-    pub rate_limit_tier: String,
+    pub access_token: Option<String>,
+    pub refresh_token: Option<String>,
+    pub expires_at: Option<u64>,
+    pub scopes: Option<Vec<String>>,
+    pub subscription_type: Option<String>,
+    pub rate_limit_tier: Option<String>,
 }
 
 // Wrapper for the OAuth credentials of Claude AI.
@@ -52,6 +52,21 @@ pub struct ClaudeUsageResponse {
     pub seven_day_sonnet: Option<UsagePeriod>,
     pub seven_day_iguana_necktie: Option<UsagePeriod>,
     pub extra_usage: ExtraUsage,
+}
+
+impl ClaudeCredentials {
+    pub fn new_empty() -> Self {
+        Self {
+            claude_ai_oauth: ClaudeAiOauth {
+                access_token: None,
+                refresh_token: None,
+                expires_at: None,
+                scopes: None,
+                subscription_type: None,
+                rate_limit_tier: None,
+            },
+        }
+    }
 }
 
 // Function to login to Claude API. It opens a terminal executing `claude /login`.
