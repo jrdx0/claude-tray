@@ -2,6 +2,8 @@
 
 A system tray application for monitoring Claude AI usage.
 
+![Demo](https://ucarecdn.com/2fc161b5-e8f4-4efe-a486-5fc73884d723/)
+
 ## Table of Contents
 
 - [Description](#description)
