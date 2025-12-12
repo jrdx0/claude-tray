@@ -1,12 +1,15 @@
+mod api;
 mod claude;
 
-use claude::ClaudeCredentials;
+use claude::Claude;
 use image::GenericImageView;
 use ksni::{Handle, TrayMethods, menu::*};
+use log::{error, info, trace};
 use std::{sync::LazyLock, time::Duration};
 use tokio::sync::mpsc;
 
 // Commands nums that can be sent to the updater channel
+#[derive(Debug)]
 enum UpdaterCommand {
     Start,
     Stop,
@@ -37,11 +40,8 @@ static CLAUDE_ICON: LazyLock<ksni::Icon> = LazyLock::new(|| {
 // Tray variables to handle authentication and usage tracking
 #[derive(Debug)]
 struct AppTray {
-    // Indicates whether the user is logged in
-    is_login: bool,
-    // The Claude API requires credentials to make requests. To get this
-    // information is necessary to log in using the Claude console command
-    credentials: claude::ClaudeCredentials,
+    // Claude instance
+    claude: Claude,
     // Variables to track usage
     five_hour_usage: f32,
     seven_day_usage: f32,
@@ -70,17 +70,16 @@ impl ksni::Tray for AppTray {
             StandardItem {
                 label: "Iniciar sesión".into(),
                 // If login is false, show login option
-                visible: !self.is_login,
-                activate: Box::new(|this: &mut Self| match claude::login() {
-                    Ok(credentials) => {
-                        this.is_login = true;
-                        this.credentials = credentials;
+                visible: self.claude.access_token.is_none(),
+                activate: Box::new(|this: &mut Self| match this.claude.login() {
+                    Ok(_) => {
+                        trace!("Logged in successfully. Sending start command to updater");
 
                         if let Err(e) = this.updater_channel.send(UpdaterCommand::Start) {
                             eprintln!("Failed to start updater: {}", e);
                         }
                     }
-                    Err(err) => eprintln!("Error logging in: {}", err),
+                    Err(err) => error!("Error logging in: {}", err),
                 }),
                 ..Default::default()
             }
@@ -90,7 +89,7 @@ impl ksni::Tray for AppTray {
                     "Plan usage limits\nCurrent session ({}/100)",
                     self.five_hour_usage
                 ),
-                visible: self.is_login,
+                visible: self.claude.access_token.is_some(),
                 ..Default::default()
             }
             .into(),
@@ -99,7 +98,7 @@ impl ksni::Tray for AppTray {
                     "Weekly usage limits\nAll models ({}/100)",
                     self.seven_day_usage
                 ),
-                visible: self.is_login,
+                visible: self.claude.access_token.is_some(),
                 ..Default::default()
             }
             .into(),
@@ -129,31 +128,16 @@ impl ksni::Tray for AppTray {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let mut is_login = false;
-
-    // Try to load credentials from a file. In case of error, assume the user is
-    // not logged in to a claude account and will show the login option in the tray menu
-    let credentials: claude::ClaudeCredentials = match claude::get_credentials() {
-        Ok(credentials) => {
-            is_login = true;
-            credentials
-        }
-        Err(err) => {
-            println!("Error getting credentials: {}", err);
-
-            // Set default credentials values. Maybe
-            // use Option::None instead of an empty object?
-            ClaudeCredentials::new_empty()
-        }
-    };
+    env_logger::Builder::from_default_env()
+        .filter_level(log::LevelFilter::Trace)
+        .init();
 
     let (updater_channel, mut updater_receiver) = mpsc::unbounded_channel::<UpdaterCommand>();
 
-    // Set the values of the tray variables based on the
-    // user's login status and the response to the usage request.
+    // Initial tray values before executing
+    // updater task to update usage information
     let tray = AppTray {
-        is_login,
-        credentials,
+        claude: Claude::new(),
         five_hour_usage: 0.0,
         seven_day_usage: 0.0,
         updater_channel,
@@ -166,9 +150,11 @@ async fn main() {
         let mut updater_task: Option<tokio::task::JoinHandle<()>> = None;
 
         while let Some(command) = updater_receiver.recv().await {
+            trace!("Command sent to handle updater task, value {:?}", command);
+
             match command {
                 UpdaterCommand::Start => {
-                    println!("Starting usage updater");
+                    trace!("Starting usage updater");
 
                     // Check if the updater task is already running to not start it again
                     if updater_task.is_none() {
@@ -176,7 +162,7 @@ async fn main() {
                     }
                 }
                 UpdaterCommand::Stop => {
-                    print!("Stopping usage updater");
+                    trace!("Stopping usage updater");
 
                     if let Some(task) = updater_task.take() {
                         task.abort();
@@ -188,7 +174,7 @@ async fn main() {
 
     handle
         .update(|tray: &mut AppTray| {
-            if tray.is_login {
+            if tray.claude.access_token.is_some() {
                 tray.updater_channel
                     .send(UpdaterCommand::Start)
                     .expect("Failed to send start command");
@@ -217,71 +203,56 @@ fn usage_updater_task(handle: &Handle<AppTray>) -> tokio::task::JoinHandle<()> {
             loop {
                 interval.tick().await;
 
-                println!("Fetching usage data...");
+                trace!("Fetching usage data from updater task");
 
-                // Get the access token from the handle of the tray
-                let token = match handle_for_updater
+                let tray_claude = handle_for_updater
                     .update(|tray: &mut AppTray| {
-                        tray.credentials.claude_ai_oauth.access_token.clone()
-                    })
-                    .await
-                {
-                    Some(token) => {
-                        if let Some(access_token) = token {
-                            access_token
+                        if tray.claude.access_token.is_none() {
+                            None
                         } else {
-                            break Err("No access token found".to_string());
+                            Some(tray.claude.clone())
                         }
-                    }
-                    None => break Err("No access token found".to_string()),
+                    })
+                    .await;
+
+                let mut tray_claude = match tray_claude {
+                    Some(Some(claude)) => claude,
+                    Some(None) => break Err("No access token found".to_string()),
+                    None => break Err("Failed to access tray".to_string()),
                 };
 
-                // Check if the token is empty. If it is not, return an error
-                // and end the loop using a break
-                if !token.is_empty() {
-                    // Get usage data and compare the result using match.
-                    // If it returns an error, break the loop and return the error
-                    match claude::get_usage(&token).await {
-                        Ok(usage) => {
-                            // Update usage data
-                            handle_for_updater
-                                .update(|tray: &mut AppTray| {
-                                    tray.five_hour_usage = usage.five_hour.utilization;
-                                    tray.seven_day_usage = usage.seven_day.utilization;
-                                })
-                                .await;
+                // Get usage data
+                match tray_claude.get_usage().await {
+                    Ok(usage) => {
+                        // Update usage data
+                        handle_for_updater
+                            .update(|tray: &mut AppTray| {
+                                tray.five_hour_usage = usage.five_hour.utilization;
+                                tray.seven_day_usage = usage.seven_day.utilization;
+                            })
+                            .await;
 
-                            println!("Usage data updated!");
-                        }
-                        Err(err) => {
-                            break Err(format!("Failed to fetch usage data: {}", err));
-                        }
-                    };
-                } else {
-                    break Err("No access token found".to_string());
+                        info!("Usage data updated!");
+                    }
+                    Err(err) => break Err(err),
                 }
             }
         };
 
-        match result {
-            Err(err) => {
-                println!("Failed to update usage data: {}", err);
+        if let Err(err) = result {
+            error!("{}", err);
 
-                // If something went wrong, set the values of tray
-                // like if the user is not logged in and sends a
-                // stop command to the updater
-                handle_for_updater
-                    .update(|tray: &mut AppTray| {
-                        tray.is_login = false;
-                        tray.credentials = ClaudeCredentials::new_empty();
+            // If something went wrong, clear the token and stop the updater
+            // This forces the user to log in again
+            handle_for_updater
+                .update(|tray: &mut AppTray| {
+                    tray.claude.access_token = None;
 
-                        tray.updater_channel
-                            .send(UpdaterCommand::Stop)
-                            .expect("Failed to send stop command");
-                    })
-                    .await;
-            }
-            Ok(_) => (),
+                    tray.updater_channel
+                        .send(UpdaterCommand::Stop)
+                        .expect("Failed to send stop command");
+                })
+                .await;
         }
     })
 }
