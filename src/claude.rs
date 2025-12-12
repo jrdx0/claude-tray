@@ -49,8 +49,9 @@ impl Claude {
         trace!("Start login process using gnome-terminal");
 
         let mut child_term = Command::new("gnome-terminal")
-            .arg("-e")
-            .arg("claude /login")
+            .arg("--")
+            .arg("claude")
+            .arg("/login")
             .spawn()
             .map_err(|e| format!("Failed to spawn terminal: {}", e))?;
 
