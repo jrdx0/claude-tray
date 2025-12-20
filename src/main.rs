@@ -1,5 +1,6 @@
 mod api;
 mod claude;
+mod utils;
 
 use claude::Claude;
 use image::GenericImageView;
@@ -71,15 +72,22 @@ impl ksni::Tray for AppTray {
                 label: "Iniciar sesión".into(),
                 // If login is false, show login option
                 visible: self.claude.access_token.is_none(),
-                activate: Box::new(|this: &mut Self| match this.claude.login() {
-                    Ok(_) => {
-                        trace!("Logged in successfully. Sending start command to updater");
+                activate: Box::new(|this: &mut Self| {
+                    let mut claude = this.claude.clone();
+                    let updater_channel = this.updater_channel.clone();
 
-                        if let Err(e) = this.updater_channel.send(UpdaterCommand::Start) {
-                            eprintln!("Failed to start updater: {}", e);
+                    tokio::spawn(async move {
+                        match claude.login().await {
+                            Ok(_) => {
+                                trace!("Logged in successfully. Sending start command to updater");
+
+                                if let Err(e) = updater_channel.send(UpdaterCommand::Start) {
+                                    error!("Failed to start updater: {}", e);
+                                }
+                            }
+                            Err(err) => error!("Error logging in: {}", err),
                         }
-                    }
-                    Err(err) => error!("Error logging in: {}", err),
+                    });
                 }),
                 ..Default::default()
             }

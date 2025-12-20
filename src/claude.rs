@@ -1,7 +1,11 @@
-use crate::api::{ClaudeErrorResponse, ClaudeUsageResponse};
+use crate::api::{
+    ANTHROPIC_AUTH_SCOPE, ANTHROPIC_AUTH_URL, ANTHROPIC_CLIENT_ID, ClaudeErrorResponse,
+    ClaudeUsageResponse, OAUTH_REDIRECT_PORT, generate_code_challenge, generate_code_verifier,
+    generate_state, wait_for_oauth_callback,
+};
 use log::{error, info, trace};
 use serde::{Deserialize, Serialize};
-use std::{fs, process::Command};
+use std::fs;
 
 const CLAUDE_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 
@@ -45,25 +49,34 @@ impl Claude {
     // Function to login to Claude API. It opens a terminal executing `claude /login`.
     // When the user exits claude code execution, the terminal is closed and the
     // function tries to get the credentials.
-    pub fn login(&mut self) -> Result<(), String> {
-        trace!("Start login process using gnome-terminal");
+    pub async fn login(&mut self) -> Result<(), String> {
+        info!("Starting OAuth login flow");
 
-        let mut child_term = Command::new("gnome-terminal")
-            .arg("--")
-            .arg("claude")
-            .arg("/login")
-            .spawn()
-            .map_err(|e| format!("Failed to spawn terminal: {}", e))?;
+        let code_verifier = generate_code_verifier();
+        let code_challenge = generate_code_challenge(&code_verifier);
+        let state = generate_state();
 
-        child_term
-            .wait()
-            .map_err(|e| format!("Failed to wait for terminal: {}", e))?;
+        trace!("Generated PKCE verifier and challenge");
 
-        trace!("Terminal closed. Verifying creation of credentials");
+        let redirect_url = format!("http://localhost:{}/callback", OAUTH_REDIRECT_PORT);
+        let auth_url = format!(
+            "{}?code=true&client_id={}&response_type=code&redirect_uri={}&scope={}&code_challenge={}&code_challenge_method=S256&state={}",
+            ANTHROPIC_AUTH_URL,                        // Url
+            ANTHROPIC_CLIENT_ID,                       // Claude client ID
+            urlencoding::encode(&redirect_url),        // Redirect URL
+            urlencoding::encode(ANTHROPIC_AUTH_SCOPE), // Scope
+            code_challenge,                            // Code challenge
+            state                                      // State
+        );
 
-        if let Err(err) = self.get_credentials() {
-            error!("Failed to get credentials: {}", err);
-        }
+        info!("Opening browser for authorization");
+
+        webbrowser::open(&auth_url).map_err(|e| format!("Failed to open browser: {}", e))?;
+
+        info!("Waiting for OAuth callback");
+        let auth_code = wait_for_oauth_callback(&state).await?;
+
+        info!("Received authorization code");
 
         Ok(())
     }
