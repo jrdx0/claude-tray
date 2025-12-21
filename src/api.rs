@@ -1,6 +1,7 @@
 use base64::{Engine as _, engine::general_purpose};
 use log::trace;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -13,7 +14,7 @@ pub const ANTHROPIC_TOKEN_URL: &str = "https://console.anthropic.com/v1/oauth/to
 
 pub const ANTHROPIC_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 
-pub const ANTHROPIC_AUTH_SCOPE: &str = "org:create_api_key user:profile user:inference";
+pub const ANTHROPIC_AUTH_SCOPE: &str = "user:profile user:inference user:sessions:claude_code";
 
 pub const OAUTH_REDIRECT_PORT: u16 = 54545;
 
@@ -47,7 +48,7 @@ pub struct ClaudeErrorResponse {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct UsagePeriod {
     pub utilization: f32,
-    pub resets_at: String,
+    pub resets_at: Option<String>,
 }
 
 // It is part of the response of the Claude API usage endpoint.
@@ -69,8 +70,21 @@ pub struct ClaudeUsageResponse {
     pub seven_day_oauth_apps: Option<UsagePeriod>,
     pub seven_day_opus: Option<UsagePeriod>,
     pub seven_day_sonnet: Option<UsagePeriod>,
+    pub iguana_necktie: Option<UsagePeriod>,
     pub seven_day_iguana_necktie: Option<UsagePeriod>,
     pub extra_usage: ExtraUsage,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Organization {
+    pub uuid: String,
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Account {
+    pub uuid: String,
+    pub email_address: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -79,19 +93,20 @@ pub struct AnthropicTokenResponse {
     pub refresh_token: String,
     pub expires_in: u64,
     pub token_type: String,
-    pub scope: String,
+    pub organization: Organization,
+    pub account: Account,
 }
 
 // Generates a code verifier for OAuth2 authorization.
 pub fn generate_code_verifier() -> String {
-    let random_bytes: Vec<u8> = (0..32).map(|_| rand::random::<u8>()).collect();
+    let random_bytes: [u8; 32] = rand::random();
     general_purpose::URL_SAFE_NO_PAD.encode(random_bytes)
 }
 
 // Generates a state for OAuth2 authorization.
 pub fn generate_state() -> String {
-    let random_bytes: Vec<u8> = (0..16).map(|_| rand::random::<u8>()).collect();
-    general_purpose::URL_SAFE_NO_PAD.encode(random_bytes)
+    let random_bytes: [u8; 32] = rand::random();
+    hex::encode(random_bytes)
 }
 
 // Generates a code challenge for OAuth2 authorization.
@@ -138,4 +153,56 @@ pub async fn wait_for_oauth_callback(expected_state: &str) -> Result<String, Str
         .map_err(|e| format!("Failed to write to stream: {}", e))?;
 
     Ok(code)
+}
+
+pub async fn exchange_code_for_token(
+    code: &str,
+    state: &str,
+    code_verifier: &str,
+) -> Result<AnthropicTokenResponse, String> {
+    let client = reqwest::Client::new();
+
+    let redirect_url = format!("http://localhost:{}/callback", OAUTH_REDIRECT_PORT);
+
+    let request_body = json!({
+        "code": code,
+        "state": state,
+        "grant_type": "authorization_code",
+        "client_id": ANTHROPIC_CLIENT_ID,
+        "redirect_uri": redirect_url,
+        "code_verifier": code_verifier
+    });
+
+    trace!("Token exchange request body: {}", request_body);
+
+    let response = client
+        .post(ANTHROPIC_TOKEN_URL)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json")
+        .json(&request_body)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to send request: {}", e))?;
+
+    let status = response.status();
+
+    let response_text = response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read response: {}", e))?;
+
+    trace!(
+        "Token exchange response (status {}): {}",
+        status, response_text
+    );
+
+    if !status.is_success() {
+        return Err(format!(
+            "Token exchange failed with status {}: {}",
+            status, response_text
+        ));
+    }
+
+    serde_json::from_str::<AnthropicTokenResponse>(&response_text)
+        .map_err(|e| format!("Failed to parse token response: {}", e))
 }

@@ -1,7 +1,7 @@
 use crate::api::{
     ANTHROPIC_AUTH_SCOPE, ANTHROPIC_AUTH_URL, ANTHROPIC_CLIENT_ID, ClaudeErrorResponse,
-    ClaudeUsageResponse, OAUTH_REDIRECT_PORT, generate_code_challenge, generate_code_verifier,
-    generate_state, wait_for_oauth_callback,
+    ClaudeUsageResponse, OAUTH_REDIRECT_PORT, exchange_code_for_token, generate_code_challenge,
+    generate_code_verifier, generate_state, wait_for_oauth_callback,
 };
 use log::{error, info, trace};
 use serde::{Deserialize, Serialize};
@@ -52,9 +52,10 @@ impl Claude {
     pub async fn login(&mut self) -> Result<(), String> {
         info!("Starting OAuth login flow");
 
-        let code_verifier = generate_code_verifier();
-        let code_challenge = generate_code_challenge(&code_verifier);
         let state = generate_state();
+        let code_verifier = generate_code_verifier();
+
+        let code_challenge = generate_code_challenge(&code_verifier);
 
         trace!("Generated PKCE verifier and challenge");
 
@@ -70,13 +71,17 @@ impl Claude {
         );
 
         info!("Opening browser for authorization");
-
         webbrowser::open(&auth_url).map_err(|e| format!("Failed to open browser: {}", e))?;
 
         info!("Waiting for OAuth callback");
         let auth_code = wait_for_oauth_callback(&state).await?;
-
         info!("Received authorization code");
+
+        info!("Exchanging authorization code for tokens");
+        let token_exchanged = exchange_code_for_token(&auth_code, &state, &code_verifier).await?;
+        info!("Successfully obtained access token");
+
+        println!("{:#?}", token_exchanged);
 
         Ok(())
     }
