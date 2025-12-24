@@ -71,7 +71,7 @@ impl ksni::Tray for AppTray {
             StandardItem {
                 label: "Iniciar sesión".into(),
                 // If login is false, show login option
-                // visible: self.claude.access_token.is_none(),
+                visible: self.claude.access_token.is_none(),
                 activate: Box::new(|this: &mut Self| {
                     let mut claude = this.claude.clone();
                     let updater_channel = this.updater_channel.clone();

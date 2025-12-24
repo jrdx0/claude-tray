@@ -1,33 +1,19 @@
 use crate::api::{
-    ANTHROPIC_AUTH_SCOPE, ANTHROPIC_AUTH_URL, ANTHROPIC_CLIENT_ID, ClaudeErrorResponse,
-    ClaudeUsageResponse, OAUTH_REDIRECT_PORT, exchange_code_for_token, generate_code_challenge,
-    generate_code_verifier, generate_state, wait_for_oauth_callback,
+    ANTHROPIC_AUTH_SCOPE, ANTHROPIC_AUTH_URL, ANTHROPIC_CLIENT_ID, AnthropicTokenResponse,
+    ClaudeErrorResponse, ClaudeUsageResponse, OAUTH_REDIRECT_PORT, exchange_code_for_token,
+    generate_code_challenge, generate_code_verifier, generate_state, wait_for_oauth_callback,
 };
 use log::{error, info, trace};
 use serde::{Deserialize, Serialize};
-use std::fs;
+use std::{fs, path::PathBuf};
 
 const CLAUDE_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 
-// This is the structure for the OAuth credentials of Claude AI
-// stored in a file. It is used to authenticate requests to the Claude API.
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ClaudeAiOauth {
-    // This is the access token for the OAuth credentials of Claude AI.
-    pub access_token: Option<String>,
-    pub refresh_token: Option<String>,
-    pub expires_at: Option<u64>,
-    pub scopes: Option<Vec<String>>,
-    pub subscription_type: Option<String>,
-    pub rate_limit_tier: Option<String>,
-}
-
 // Wrapper for the OAuth credentials of Claude AI.
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ClaudeCredentials {
-    pub claude_ai_oauth: ClaudeAiOauth,
+    pub access_token: String,
+    pub refresh_token: String,
 }
 
 #[derive(Debug, Clone)]
@@ -81,7 +67,9 @@ impl Claude {
         let token_exchanged = exchange_code_for_token(&auth_code, &state, &code_verifier).await?;
         info!("Successfully obtained access token");
 
-        println!("{:#?}", token_exchanged);
+        Claude::save_credentials(&token_exchanged)?;
+
+        self.access_token = Some(token_exchanged.access_token);
 
         Ok(())
     }
@@ -95,26 +83,23 @@ impl Claude {
             .map_err(|e| format!("HOME environment variable not set: {}", e))?;
 
         trace!(
-            "Reading credentials file located in {}/.claude/.credentials.json",
+            "Reading credentials file located in {}/.config/claude-tray/credentials.json",
             env_home
         );
 
-        let credentials = fs::read_to_string(format!("{}/.claude/.credentials.json", env_home))
-            .map_err(|e| format!("Failed to read credentials file: {}", e))?;
+        let credentials =
+            fs::read_to_string(format!("{}/.config/claude-tray/credentials.json", env_home))
+                .map_err(|e| format!("Failed to read credentials file: {}", e))?;
 
         let credentials: ClaudeCredentials = serde_json::from_str(&credentials)
             .map_err(|e| format!("Error getting credentials: {}", e))?;
 
         info!(
-            "Credentials found in {}/.claude/.credentials.json",
+            "Credentials found in {}/.config/claude-tray/credentials.json",
             env_home
         );
 
-        self.access_token = credentials.claude_ai_oauth.access_token;
-
-        if self.access_token.is_none() {
-            return Err("Access token not found".to_string());
-        }
+        self.access_token = Some(credentials.access_token);
 
         Ok(())
     }
@@ -162,5 +147,39 @@ impl Claude {
         }
 
         Err(format!("Unexpected API response format: {}", response_text))
+    }
+
+    // Store the credentials in the file credentials.json
+    fn save_credentials(credentials: &AnthropicTokenResponse) -> Result<(), String> {
+        let env_home = std::env::var("HOME")
+            .map_err(|e| format!("HOME environment variable not set: {}", e))?;
+
+        let config_dir = PathBuf::from(env_home).join(".config/claude-tray");
+
+        trace!("Saving credentials to {:?}", config_dir);
+
+        if !config_dir.exists() {
+            info!("Credentials file not exists. Creating new file");
+
+            fs::create_dir_all(&config_dir)
+                .map_err(|e| format!("Failed to create config directory: {}", e))?;
+        }
+
+        let credentials_json = ClaudeCredentials {
+            access_token: credentials.access_token.clone(),
+            refresh_token: credentials.refresh_token.clone(),
+        };
+
+        let json_fmt = serde_json::to_string_pretty(&credentials_json)
+            .map_err(|e| format!("Failed to serialize credentials: {}", e))?;
+
+        let credentials_file = config_dir.join("credentials.json");
+
+        fs::write(&credentials_file, json_fmt)
+            .map_err(|e| format!("Failed to write credentials file: {}", e))?;
+
+        info!("Credentials saved successfully");
+
+        Ok(())
     }
 }
