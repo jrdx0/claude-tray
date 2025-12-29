@@ -3,7 +3,7 @@ pub fn extract_param_from_url(request: &str, param_name: &str) -> Result<String,
     let search = format!("{}=", param_name);
     let param_start = request
         .find(&search)
-        .ok_or(format!("{} parameter not found in callback", param_name))?;
+        .ok_or(format!("{} parameter not found in callback", param_name).to_lowercase())?;
 
     let param_part = &request[param_start + search.len()..];
     let param_end = param_part.find(&[' ', '&'][..]).unwrap_or(param_part.len());
