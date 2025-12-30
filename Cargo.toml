@@ -1,6 +1,6 @@
 [package]
 name = "claude-tray"
-version = "0.1.0"
+version = "0.2.0"
 description = "A Linux system tray application for monitoring Claude AI usage"
 keywords = ["claude", "monitor", "linux"]
 repository = "https://github.com/jrdx0/claude-tray"
