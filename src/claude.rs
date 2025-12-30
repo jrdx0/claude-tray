@@ -152,7 +152,7 @@ pub async fn wait_for_oauth_callback(expected_state: &str) -> Result<String, Str
     let received_state = extract_param_from_url(&request, "state")?;
 
     if received_state != expected_state {
-        return Err("state value is not the same".to_string());
+        return Err("state value is not the same".into());
     }
 
     let code = extract_param_from_url(&request, "code")?;

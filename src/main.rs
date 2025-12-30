@@ -2,8 +2,8 @@ mod claude;
 mod utils;
 
 use image::GenericImageView;
-use ksni::{TrayMethods, menu::*};
-use std::sync::LazyLock;
+use ksni::{Handle, TrayMethods, menu::*};
+use std::{sync::LazyLock, time::Duration};
 use tokio::sync::mpsc;
 
 use crate::claude::ClaudeCredentials;
@@ -32,6 +32,8 @@ static CLAUDE_ICON: LazyLock<ksni::Icon> = LazyLock::new(|| {
 
 enum TrayMessage {
     Login,
+    StartUsageTracking,
+    StopUsageTracking,
 }
 
 // Tray variables to handle authentication and usage tracking
@@ -73,7 +75,10 @@ impl ksni::Tray for AppTray {
                 // For some reason, using Cosmic, this element cannot be hidden
                 visible: self.is_login_visible,
                 activate: Box::new(|this: &mut Self| {
-                    let _ = this.notifier.try_send(TrayMessage::Login);
+                    let _ = this
+                        .notifier
+                        .try_send(TrayMessage::Login)
+                        .map_err(|e| log::error!("{}", e));
                 }),
                 ..Default::default()
             }
@@ -155,6 +160,8 @@ async fn main() {
                     tray.is_usage_visible = true;
 
                     log::trace!("credentials loaded from locally source. Hidding login button");
+
+                    let _ = tray.notifier.try_send(TrayMessage::StartUsageTracking);
                 })
                 .await;
         }
@@ -162,6 +169,8 @@ async fn main() {
             log::error!("{}", e);
         }
     }
+
+    let mut tracking_task: Option<tokio::task::JoinHandle<()>> = None;
 
     loop {
         tokio::select! {
@@ -190,11 +199,90 @@ async fn main() {
 
                                 tray.is_login_visible = false;
                                 tray.is_usage_visible = true;
+
+                                let _ = tray.notifier.try_send(TrayMessage::StartUsageTracking)
+                                    .map_err(|e| log::error!("{}", e));
                             })
                             .await;
+                    }
+
+                    TrayMessage::StartUsageTracking => {
+                        if tracking_task.is_none() {
+                            if let Ok(task) = usage_tracking_task(&handle).await {
+                                tracking_task = Some(task);
+                            } else {
+                                log::error!("failed to start usage tracking");
+                            }
+                        }
+                    }
+
+                    TrayMessage::StopUsageTracking => {
+                        log::trace!("stopping usage tracking");
+                        if let Some(task) = tracking_task.take() {
+                            task.abort();
+                        }
                     }
                 }
             }
         }
     }
+}
+
+async fn usage_tracking_task(
+    handle: &Handle<AppTray>,
+) -> Result<tokio::task::JoinHandle<()>, String> {
+    let handle_tracking = handle.clone();
+
+    let Some(credentials) = handle
+        .update(|tray: &mut AppTray| {
+            tray.access_token
+                .as_ref()
+                .map(|token| token.access_token.clone())
+        })
+        .await
+        .flatten()
+    else {
+        return Err("no credentials available".into());
+    };
+
+    let tracking_task = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_mins(5));
+
+        let tracking_result: Result<(), String> = {
+            loop {
+                interval.tick().await;
+
+                log::trace!("getting usage data from claude api");
+
+                if let Ok(usage) = claude::get_usage(&credentials).await {
+                    handle_tracking
+                        .update(|tray: &mut AppTray| {
+                            tray.five_hour_usage = usage.five_hour.utilization;
+                            tray.seven_day_usage = usage.seven_day.utilization;
+                        })
+                        .await;
+                } else {
+                    break Err("failed to get usage data".into());
+                }
+            }
+        };
+
+        if let Err(error) = tracking_result {
+            log::error!("usage tracking failed: {}", error);
+
+            handle_tracking
+                .update(|tray: &mut AppTray| {
+                    tray.is_login_visible = true;
+                    tray.is_usage_visible = false;
+
+                    tray.five_hour_usage = 0.0;
+                    tray.seven_day_usage = 0.0;
+
+                    let _ = tray.notifier.try_send(TrayMessage::StopUsageTracking);
+                })
+                .await;
+        }
+    });
+
+    Ok(tracking_task)
 }
