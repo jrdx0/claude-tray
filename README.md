@@ -28,7 +28,7 @@ A system tray application for monitoring Claude AI usage.
 
 ## Description
 
-Claude Tray is a Linux/Debian system tray utility that integrates with Claude AI's OAuth API. It provides quick access to Claude AI services and displays usage statistics directly from your system tray.
+Claude Tray is a Linux/Debian system tray utility that integrates with Claude AI's OAuth API. It provides quick access to Claude AI services and displays usage statistics directly to your system tray.
 
 Features:
 - System tray integration for quick access
@@ -38,10 +38,6 @@ Features:
 - Systemd service integration for automatic startup
 
 ## Installation
-
-### Prerequisites
-
-- Claude CLI installed and configured
 
 ### Install from .deb Package
 
@@ -189,9 +185,11 @@ This directory is preserved during package upgrades and must be manually removed
 ## Tested OS
 
 This application has been tested on:
-- Pop!_OS (Linux 6.17.4)
+- Pop!_OS 22.04 (Linux 6.17.4)
+- Ubuntu 25.10 (Linux 6.17.0-8-generic)
 
-Note: This application requires a system tray implementation compatible with the StatusNotifier/AppIndicator protocol (commonly available on Linux desktop environments) and x-terminal-emulator for terminal-based interactions.
+Note: This application requires a system tray implementation compatible with the StatusNotifier/AppIndicator 
+protocol (commonly available on Linux desktop environments).
 
 ## Contributing
 
